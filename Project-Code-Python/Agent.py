@@ -7,28 +7,19 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageOps
 class Agent:
 
     def __init__(self):
-        self.weights = {"Unchanged": 6,
-                        "Inverted": 5,
-                        "Mirrored": 4,
-                        "Rotated": 3,
-                        "Scaled": 2,
-                        "Deleted": 1,
-                        "Changed": 0,
-                        }
+        self.tests = [
+            ("Unchanged", self.checkIdentical, 6),
+            ("Inverted", self.checkInverted, 5),
+            ("Mirrored", self.checkMirrored, 4),
+            ("Rotated", self.checkRotated, 3),
+            ("Changed", self.checkChanged, 2),
+            ("Deleted", self.checkDeleted, 1),
+            ("Unknown", self.checkUnknown, 0),
+        ]
 
-        self.tests = OrderedDict([
-            ("Unchanged", [self.checkIdentical]),
-            ("Inverted", [self.checkInverted]),
-            ("Mirrored",
-             [self.checkMirrored('horizontal'),
-              self.checkMirrored('vertical')]),
-            ("Rotated", [self.checkRotated(90),
-                         self.checkRotated(180),
-                         self.checkRotated(270)]),
-            ("Scaled", [self.checkScaled]),
-            ("Deleted", [self.checkDeleted]),
-            ("Changed", [self.checkChanged])
-        ])
+    def blackAndWhite(self, image):
+        image = image.convert('L')
+        return image.point(lambda x: 0 if x < 100 else 255, '1')
 
     def getImages(self, problem):
         figures = problem.figures.items()
@@ -38,7 +29,7 @@ class Agent:
         for figure in figures:
             key = figure[0]
             fileName = figure[1].visualFilename
-            img = Image.open(fileName)
+            img = self.blackAndWhite(Image.open(fileName))
             if key.isalpha():
                 probImgs.append((key, img))
             else:
@@ -47,15 +38,13 @@ class Agent:
         ansImgs.sort(key=lambda entry: entry[0])
         return probImgs, ansImgs
 
-    def checkCorrelation(self, img1, img2):
+    def isCorrelated(self, img1, img2):
         hist1 = img1.histogram()
         hist2 = img2.histogram()
         minima = np.minimum(hist1, hist2)
         return np.true_divide(np.sum(minima), np.sum(hist2))
 
-    def checkIdentical(self, img1, img2):
-        img1 = img1.convert("1")
-        img2 = img2.convert("1")
+    def isIdentical(self, img1, img2):
         if img1.size != img2.size:
             return False
         count = 0
@@ -70,33 +59,25 @@ class Agent:
                         return False
         return True
 
-    def checkIdenticalBBox(self, img1, img2):
-        inverted1 = ImageChops.invert(img1)
-        inverted2 = ImageChops.invert(img2)
-        box1 = img1.convert('RGB').crop(inverted1.getbbox())
-        box2 = img2.convert('RGB').crop(inverted2.getbbox())
-        if box1.size != box2.size:
-            return False
-        count = 0
-        rows, cols = box1.size
-        for row in range(rows):
-            for col in range(cols):
-                box1_pixel = box1.getpixel((row, col))
-                box2_pixel = box2.getpixel((row, col))
-                if box1_pixel != box2_pixel:
-                    count += 1
-                    if count > (rows * cols * 0.03):
-                        print('pixel count: ' + str(count)
-                              + 'limit: ' + str(rows * cols * 0.04))
-                        return False
-        return True
+    def checkIdentical(self, group1, group2):
+        for x in range(0, len(group1) - 1):
+            group1_curr = group1[x]
+            group1_next = group1[x + 1]
 
-    def checkInverted(self, img1, img2):
-        if self.checkCorrelation(img1, img2) > 0.96:
+            group2_curr = group2[x]
+            group2_next = group2[x + 1]
+
+            if (self.isIdentical(group1_curr, group1_next) and
+                    self.isIdentical(group2_curr, group2_next)):
+                return True
             return False
 
+    def isInverted(self, img1, img2):
         img1 = img1.convert('RGB')
         img2 = img2.convert('RGB')
+        if self.isCorrelated(img1, img2) > 0.96:
+            return False
+
         inverted1 = ImageChops.invert(img1)
         inverted2 = ImageChops.invert(img2)
         box1 = img1.crop(inverted1.getbbox())
@@ -123,37 +104,69 @@ class Agent:
         n[(n[:, :, 0:3] == [255, 0, 255]).all(2)] = [255, 255, 255]
 
         filled = Image.fromarray(n)
-        if self.checkCorrelation(filled, alreadyFilled) > 0.96:
+        if self.isCorrelated(filled, alreadyFilled) > 0.96:
             return True
         return False
 
-    def checkMirrored(self, axis):
-        direction = (Image.FLIP_TOP_BOTTOM, Image.FLIP_LEFT_RIGHT)[
-            axis == "vertical"]
+    def checkInverted(self, group1, group2):
+        for x in range(0, len(group1) - 1):
+            group1_curr = group1[x]
+            group1_next = group1[x + 1]
 
-        def performCheck(img1, img2):
-            flipped = img1.transpose(direction)
-            if self.checkIdentical(flipped, img2):
+            group2_curr = group2[x]
+            group2_next = group2[x + 1]
+
+            if (self.isInverted(group1_curr, group1_next) and
+                    self.isInverted(group2_curr, group2_next)):
                 return True
             return False
 
-        return performCheck
+    def isMirrored(self, img1, img2, direction):
+        flipped = img1.transpose(direction)
+        if self.isIdentical(flipped, img2):
+            return True
+        return False
 
-    def checkRotated(self, deg):
-        rotations = {
-            90: Image.ROTATE_90,
-            180: Image.ROTATE_180,
-            270: Image.ROTATE_270
-        }
+    def checkMirrored(self, group1, group2):
+        directions = [Image.FLIP_TOP_BOTTOM, Image.FLIP_LEFT_RIGHT]
+        for x in range(0, len(group1) - 1):
+            group1_curr = group1[x]
+            group1_next = group1[x + 1]
 
-        def performCheck(img1, img2):
-            rotated = img1.transpose(rotations[deg])
+            group2_curr = group2[x]
+            group2_next = group2[x + 1]
 
-            if self.checkIdentical(rotated, img2):
-                return True
-            return False
+            for direction in directions:
+                if (self.isMirrored(group1_curr, group1_next, direction) and
+                        self.isMirrored(group2_curr, group2_next, direction)):
+                    return True
+        return False
 
-        return performCheck
+    def isRotated(self, img1, img2, rotation):
+        rotated = img1.transpose(rotation)
+
+        if self.isIdentical(rotated, img2):
+            return True
+        return False
+
+    def checkRotated(self, group1, group2):
+        rotations = [Image.ROTATE_90,
+                     Image.ROTATE_180,
+                     Image.ROTATE_270
+                     ]
+
+        for x in range(0, len(group1) - 1):
+            group1_curr = group1[x]
+            group1_next = group1[x + 1]
+
+            group2_curr = group2[x]
+            group2_next = group2[x + 1]
+
+            for rotation in rotations:
+                if (self.isRotated(group1_curr, group1_next, rotation) and
+                        self.isRotated(group2_curr, group2_next, rotation)):
+                    return True
+        return False
 
     def checkScaled(self, img1, img2):
         return False
@@ -162,63 +175,68 @@ class Agent:
         return False
 
     def checkChanged(self, img1, img2):
+        return False
+
+    def checkUnknown(self, img1, img2):
         return True
 
-    def horizontalTest(self, test):
-        def performTest(matrix):
-            if test(matrix[0], matrix[1]) & test(matrix[2], matrix[3]):
-                return True
-            return False
-        return performTest
+    def runTestOnCols(self, test, matrix):
+        group1 = [matrix[i][1]
+                  for i in range(len(matrix)) if i < len(matrix) / 2]
+        group2 = [matrix[i][1]
+                  for i in range(len(matrix)) if i >= len(matrix) / 2]
+        return test(group1, group2)
 
-    def verticalTest(self, test):
-        def performTest(matrix):
-            if test(matrix[0], matrix[2]) & test(matrix[1], matrix[3]):
-                return True
-            return False
-        return performTest
+    def runTestOnRows(self, test, matrix):
+        group1 = [matrix[i][1] for i in range(len(matrix)) if i % 2 == 0]
+        group2 = [matrix[i][1] for i in range(len(matrix)) if i % 2 != 0]
+        return test(group1, group2)
 
     def Solve(self, problem):
+        if "Problem B" not in problem.name:
+            return -1
         print(problem.name)
         probImgs, ansImgs = self.getImages(problem)
-        bestScore = float('-inf')
+        bestScore = -99999
         bestCandidate = 1
-        ansImgs = list(map(lambda tuple: tuple[1], ansImgs))
-
-        for index, candidate in enumerate(ansImgs):
-            matrix = list(map(lambda tuple: tuple[1], probImgs))
-            matrix.append(candidate)
+        # img0 = self.blackAndWhite(probImgs[0][1])
+        # img1 = self.blackAndWhite(probImgs[1][1])
+        # img2 = self.blackAndWhite(probImgs[2][1])
+        # ans = self.blackAndWhite(ansImgs[5])
+        # inverted0 = ImageChops.invert(img0)
+        # inverted1 = ImageChops.invert(img1)
+        # inverted2 = ImageChops.invert(img2)
+        # invertedA = ImageChops.invert(ans)
+        # box0 = img0.crop(inverted0.getbbox())
+        # box1 = img1.crop(inverted1.getbbox())
+        # box2 = img2.crop(inverted2.getbbox())
+        # boxA = ans.crop(invertedA.getbbox())
+        # diff1 = ImageChops.difference(img0, img1)
+        # diff2 = ImageChops.difference(img2, ans)
+        # diff3 = ImageChops.difference(box2, boxA)
+        # diff2 = diff2.filter(ImageFilter.ModeFilter)
+        # print(self.isCorrelated(diff1, diff2))
+        for index, candidate in ansImgs:
+            matrix = probImgs[:]
+            matrix.append((index, candidate))
             score = 0
-            for key, toPerform in self.tests.items():
-                matchFound = False
-                for test in toPerform:
-                    testOnHorizontal = self.horizontalTest(test)
-                    if testOnHorizontal(matrix):
-                        score += self.weights[key]
-                        matchFound = True
-                        break
-                if matchFound:
-                    print("Horizontal match found: " + key)
+
+            for subject, test, value in self.tests:
+                if self.runTestOnCols(test, matrix):
+                    print("Conclusion for columns: {}".format(subject))
+                    score += value
                     break
 
-            for key, toPerform in self.tests.items():
-                matchFound = False
-                for test in toPerform:
-                    testOnVertical = self.verticalTest(test)
-                    if testOnVertical(matrix):
-                        score += self.weights[key]
-                        matchFound = True
-                        break
-                if matchFound:
-                    print("Vertical match found: " + key)
+            for subject, test, value in self.tests:
+                if self.runTestOnRows(test, matrix):
+                    print("Conclusion for rows: {}".format(subject))
+                    score += value
                     break
-            print(" Candidate: " + str(index) +
-                  " Old Score: " + str(bestScore) +
-                  " New Score: " + str(score))
             if score > bestScore:
-                print("New best candidate, old: " +
-                      str(bestCandidate) + " new: " + str(index + 1))
+                print("New best candidate: %s, with a score of %d. Old best candidate was %d with a best score of %d." %
+                      (index, score, bestCandidate, (0, bestScore)[bestScore >= 0]))
                 bestScore = score
-                bestCandidate = index + 1
-        print("Solution: " + str(bestCandidate))
+                bestCandidate = int(index)
+
+        print("Final solution for " + problem.name + ": " + str(bestCandidate))
         return bestCandidate

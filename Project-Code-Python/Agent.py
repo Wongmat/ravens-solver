@@ -38,7 +38,7 @@ class Agent:
         ansImgs.sort(key=lambda entry: entry[0])
         return probImgs, ansImgs
 
-    def isCorrelated(self, img1, img2):
+    def getHistogramCorrelation(self, img1, img2):
         hist1 = img1.histogram()
         hist2 = img2.histogram()
         minima = np.minimum(hist1, hist2)
@@ -55,7 +55,7 @@ class Agent:
                 img2_pixel = img2.getpixel((row, col))
                 if img1_pixel != img2_pixel:
                     count += 1
-                    if count > (rows * cols * 0.03):
+                    if count > (rows * cols * 0.02):
                         return False
         return True
 
@@ -75,7 +75,7 @@ class Agent:
     def isInverted(self, img1, img2):
         img1 = img1.convert('RGB')
         img2 = img2.convert('RGB')
-        if self.isCorrelated(img1, img2) > 0.96:
+        if self.getHistogramCorrelation(img1, img2) > 0.96:
             return False
 
         inverted1 = ImageChops.invert(img1)
@@ -104,7 +104,7 @@ class Agent:
         n[(n[:, :, 0:3] == [255, 0, 255]).all(2)] = [255, 255, 255]
 
         filled = Image.fromarray(n)
-        if self.isCorrelated(filled, alreadyFilled) > 0.96:
+        if self.getHistogramCorrelation(filled, alreadyFilled) > 0.96:
             return True
         return False
 
@@ -174,7 +174,23 @@ class Agent:
     def checkDeleted(self, img1, img2):
         return False
 
-    def checkChanged(self, img1, img2):
+    def getDiff(self, img1, img2):
+        diff = ImageChops.difference(img1, img2)
+        return diff.filter(ImageFilter.ModeFilter)
+
+    def checkChanged(self, group1, group2):
+        for x in range(0, len(group1) - 1):
+            group1_curr = group1[x]
+            group1_next = group1[x + 1]
+
+            group2_curr = group2[x]
+            group2_next = group2[x + 1]
+
+            diff1 = self.getDiff(group1_curr, group1_next)
+            diff2 = self.getDiff(group2_curr, group2_next)
+
+            if self.getHistogramCorrelation(diff1, diff2) >= 0.999:
+                return True
         return False
 
     def checkUnknown(self, img1, img2):
@@ -203,25 +219,32 @@ class Agent:
             matrix = probImgs[:]
             matrix.append((index, candidate))
             score = 0
+            conclusion = "Conclusion for %s:" % (index) + " "
 
             for subject, test, value in self.tests:
                 if self.runTestOnCols(test, matrix):
-                    print("Conclusion for columns: {}".format(subject))
+                    conclusion += "Columns: %s" % (subject) + " "
                     score += value
                     break
 
             for subject, test, value in self.tests:
                 if self.runTestOnRows(test, matrix):
-                    print("Conclusion for rows: {}".format(subject))
+                    conclusion += "Rows: %s" % (subject)
                     score += value
                     break
+
+            print(conclusion)
+
             if score > bestScore:
-                print("New best candidate: %s, with a score of %d. Old best candidate was %d with a best score of %d." %
-                      (index, score, bestCandidate, (0, bestScore)[bestScore >= 0]))
+                print("New best candidate: %s, with a score of %d. " %
+                      (index, score) +
+                      " Old best candidate was %d with a best score of %d." %
+                      (bestCandidate, (0, bestScore)[bestScore >= 0]))
                 bestScore = score
                 bestCandidate = int(index)
 
-        print("Final solution for " + problem.name + ": " + str(bestCandidate))
+        print("Final solution for " + problem.name +
+              ": " + str(bestCandidate) + "\n")
         return bestCandidate
         # img0 = self.blackAndWhite(probImgs[0][1])
         # img1 = self.blackAndWhite(probImgs[1][1])

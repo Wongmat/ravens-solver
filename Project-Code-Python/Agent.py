@@ -1,7 +1,5 @@
-from collections import OrderedDict
-
 import numpy as np
-from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageOps
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 
 class Agent:

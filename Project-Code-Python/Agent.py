@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
@@ -14,6 +16,14 @@ class Agent:
             ("Deleted", self.checkDeleted, 1),
             ("Unknown", self.checkUnknown, 0),
         ]
+
+    def initTests(self, staticGroup):
+        viable_tests = []
+        for category, test, value in self.tests:
+            testTestingGroup = test(staticGroup)
+            if testTestingGroup is not None:
+                viable_tests.append((category, testTestingGroup, value))
+        return viable_tests
 
     def blackAndWhite(self, image):
         image = image.convert('L')
@@ -57,154 +67,160 @@ class Agent:
                         return False
         return True
 
-    def checkIdentical(self, group1, group2):
-        for x in range(0, len(group1) - 1):
-            group1_curr = group1[x]
-            group1_next = group1[x + 1]
+    def groupIsIdentical(self, group):
+        for x in range(0, len(group) - 1):
+            img1 = group[x]
+            img2 = group[x + 1]
+            if not self.isIdentical(img1, img2):
+                return False
+        return True
 
-            group2_curr = group2[x]
-            group2_next = group2[x + 1]
+    def checkIdentical(self, staticGroup):
+        if self.groupIsIdentical(staticGroup):
+            def testTestingGroup(testingGroup):
+                return self.groupIsIdentical(testingGroup)
+            return testTestingGroup
+        return None
 
-            if (self.isIdentical(group1_curr, group1_next) and
-                    self.isIdentical(group2_curr, group2_next)):
-                return True
-            return False
+    def isInverted(self, group):
+        for x in range(0, len(group) - 1):
+            img1 = group[x]
+            img2 = group[x + 1]
+            img1 = img1.convert('RGB')
+            img2 = img2.convert('RGB')
+            if self.getHistogramCorrelation(img1, img2) > 0.96:
+                return False
 
-    def isInverted(self, img1, img2):
-        img1 = img1.convert('RGB')
-        img2 = img2.convert('RGB')
-        if self.getHistogramCorrelation(img1, img2) > 0.96:
-            return False
+            inverted1 = ImageChops.invert(img1)
+            inverted2 = ImageChops.invert(img2)
+            box1 = img1.crop(inverted1.getbbox())
+            box2 = img2.crop(inverted2.getbbox())
 
-        inverted1 = ImageChops.invert(img1)
-        inverted2 = ImageChops.invert(img2)
-        box1 = img1.crop(inverted1.getbbox())
-        box2 = img2.crop(inverted2.getbbox())
+            centerOfBox1 = (int(0.5 * box1.width), int(0.5 * box1.height))
+            centerOfBox2 = (int(0.5 * box2.width), int(0.5 * box2.height))
+            if box1.getpixel(centerOfBox1) == box2.getpixel(centerOfBox2):
+                return False
 
-        centerOfBox1 = (int(0.5 * box1.width), int(0.5 * box1.height))
-        centerOfBox2 = (int(0.5 * box2.width), int(0.5 * box2.height))
-        if box1.getpixel(centerOfBox1) == box2.getpixel(centerOfBox2):
-            return False
+            toBeFilled = img2 if box1.getpixel(
+                centerOfBox1) == (0, 0, 0) else img1
 
-        toBeFilled = img2 if box1.getpixel(
-            centerOfBox1) == (0, 0, 0) else img1
+            alreadyFilled = (img1, img2)[toBeFilled == img1]
 
-        alreadyFilled = (img1, img2)[toBeFilled == img1]
+            ImageDraw.floodfill(
+                toBeFilled, xy=(0, 0), value=(255, 0, 255))
 
-        ImageDraw.floodfill(
-            toBeFilled, xy=(0, 0), value=(255, 0, 255))
+            # Make everything not magenta black
+            n = np.array(toBeFilled)
+            n[(n[:, :, 0:3] != [255, 0, 255]).any(2)] = [0, 0, 0]
 
-        # Make everything not magenta black
-        n = np.array(toBeFilled)
-        n[(n[:, :, 0:3] != [255, 0, 255]).any(2)] = [0, 0, 0]
+            # Revert all artifically filled magenta pixels to white
+            n[(n[:, :, 0:3] == [255, 0, 255]).all(2)] = [255, 255, 255]
 
-        # Revert all artifically filled magenta pixels to white
-        n[(n[:, :, 0:3] == [255, 0, 255]).all(2)] = [255, 255, 255]
+            filled = Image.fromarray(n)
+            if self.getHistogramCorrelation(filled, alreadyFilled) < 0.96:
+                return False
+        return True
 
-        filled = Image.fromarray(n)
-        if self.getHistogramCorrelation(filled, alreadyFilled) > 0.96:
-            return True
-        return False
+    def checkInverted(self, staticGroup):
+        if self.isInverted(staticGroup):
+            def testTestingGroup(testingGroup):
+                return self.isInverted(testingGroup)
+            return testTestingGroup
+        return None
 
-    def checkInverted(self, group1, group2):
-        for x in range(0, len(group1) - 1):
-            group1_curr = group1[x]
-            group1_next = group1[x + 1]
+    def isMirrored(self, group, direction):
+        for x in range(0, len(group) - 1):
+            img1 = group[x]
+            img2 = group[x + 1]
+            flipped = img1.transpose(direction)
+            if not self.isIdentical(flipped, img2):
+                return False
+        return True
 
-            group2_curr = group2[x]
-            group2_next = group2[x + 1]
-
-            if (self.isInverted(group1_curr, group1_next) and
-                    self.isInverted(group2_curr, group2_next)):
-                return True
-            return False
-
-    def isMirrored(self, img1, img2, direction):
-        flipped = img1.transpose(direction)
-        if self.isIdentical(flipped, img2):
-            return True
-        return False
-
-    def checkMirrored(self, group1, group2):
+    def checkMirrored(self, staticGroup):
         directions = [Image.FLIP_TOP_BOTTOM, Image.FLIP_LEFT_RIGHT]
-        for x in range(0, len(group1) - 1):
-            group1_curr = group1[x]
-            group1_next = group1[x + 1]
 
-            group2_curr = group2[x]
-            group2_next = group2[x + 1]
+        viable_directions = [direction for direction in directions if
+                             self.isMirrored(staticGroup, direction)]
 
-            for direction in directions:
-                if (self.isMirrored(group1_curr, group1_next, direction) and
-                        self.isMirrored(group2_curr, group2_next, direction)):
+        if len(viable_directions) == 0:
+            return None
+
+        def testTestingGroup(testingGroup):
+            for direction in viable_directions:
+                if self.isMirrored(testingGroup, direction):
                     return True
-        return False
+            return False
 
-    def isRotated(self, img1, img2, rotation):
-        rotated = img1.transpose(rotation)
+        return testTestingGroup
 
-        if self.isIdentical(rotated, img2):
-            return True
-        return False
+    def isRotated(self, group, rotation):
+        for x in range(0, len(group) - 1):
+            img1 = group[x]
+            img2 = group[x + 1]
 
-    def checkRotated(self, group1, group2):
+            rotated = img1.transpose(rotation)
+
+            if self.isIdentical(rotated, img2):
+                return True
+            return False
+
+    def checkRotated(self, staticGroup):
         rotations = [Image.ROTATE_90,
                      Image.ROTATE_180,
                      Image.ROTATE_270
                      ]
+        viable_rotations = [rotation for rotation in rotations if
+                            self.isRotated(staticGroup, rotation)]
 
-        for x in range(0, len(group1) - 1):
-            group1_curr = group1[x]
-            group1_next = group1[x + 1]
+        if len(viable_rotations) == 0:
+            return None
 
-            group2_curr = group2[x]
-            group2_next = group2[x + 1]
-
-            for rotation in rotations:
-                if (self.isRotated(group1_curr, group1_next, rotation) and
-                        self.isRotated(group2_curr, group2_next, rotation)):
+        def testTestingGroup(testingGroup):
+            for rotation in viable_rotations:
+                if self.isRotated(testingGroup, rotation):
                     return True
-        return False
+            return False
 
-    def checkScaled(self, img1, img2):
-        return False
+        return testTestingGroup
 
-    def checkDeleted(self, img1, img2):
-        return False
+    def checkScaled(self, staticGroup):
+        return None
+
+    def checkDeleted(self, staticGroup):
+        return None
 
     def getDiff(self, img1, img2):
         diff = ImageChops.difference(img1, img2)
         return diff.filter(ImageFilter.ModeFilter)
 
-    def checkChanged(self, group1, group2):
-        for x in range(0, len(group1) - 1):
-            group1_curr = group1[x]
-            group1_next = group1[x + 1]
+    def checkChanged(self, staticGroup):
+        firstImg = staticGroup[0]
+        secondImg = staticGroup[1]
+        base_diff = self.getDiff(firstImg, secondImg)
 
-            group2_curr = group2[x]
-            group2_next = group2[x + 1]
+        for x in range(2, len(staticGroup) - 1):
+            img1 = staticGroup[x]
+            img2 = staticGroup[x + 1]
 
-            diff1 = self.getDiff(group1_curr, group1_next)
-            diff2 = self.getDiff(group2_curr, group2_next)
+            diff = self.getDiff(img1, img2)
+            if self.getHistogramCorrelation(diff, base_diff) <= 0.999:
+                return None
 
-            if self.getHistogramCorrelation(diff1, diff2) >= 0.999:
-                return True
-        return False
+        def testTestingGroup(testingGroup):
+            for x in range(0, len(testingGroup) - 1):
+                img1 = testingGroup[x]
+                img2 = testingGroup[x + 1]
 
-    def checkUnknown(self, img1, img2):
-        return True
+                diff = self.getDiff(img1, img2)
+                if self.getHistogramCorrelation(diff, base_diff) >= 0.999:
+                    return True
+            return False
 
-    def runTestOnCols(self, test, matrix):
-        group1 = [matrix[i][1]
-                  for i in range(len(matrix)) if i < len(matrix) / 2]
-        group2 = [matrix[i][1]
-                  for i in range(len(matrix)) if i >= len(matrix) / 2]
-        return test(group1, group2)
+        return testTestingGroup
 
-    def runTestOnRows(self, test, matrix):
-        group1 = [matrix[i][1] for i in range(len(matrix)) if i % 2 == 0]
-        group2 = [matrix[i][1] for i in range(len(matrix)) if i % 2 != 0]
-        return test(group1, group2)
+    def checkUnknown(self, staticGroup):
+        return lambda testingGroup: True
 
     def Solve(self, problem):
         if "Problem B" not in problem.name:
@@ -213,20 +229,37 @@ class Agent:
         probImgs, ansImgs = self.getImages(problem)
         bestScore = -99999
         bestCandidate = 1
+
+        horizontalStaticGroup = [probImgs[i][1]
+                                 for i in range(len(probImgs))
+                                 if i < math.ceil(len(probImgs) / 2)]
+        horizontalTests = self.initTests(horizontalStaticGroup)
+
+        verticalStaticGroup = [probImgs[i][1]
+                               for i in range(len(probImgs)) if i % 2 == 0]
+        verticalTests = self.initTests(verticalStaticGroup)
+
         for index, candidate in ansImgs:
             matrix = probImgs[:]
             matrix.append((index, candidate))
+            horizontalTestGroup = [matrix[i][1] for i in range(
+                len(matrix)) if i >= math.ceil(len(matrix) / 2)]
+
+            verticalTestGroup = [matrix[i][1] for i in range(
+                len(matrix)) if i % 2 != 0]
+
             score = 0
+
             conclusion = "Conclusion for %s:" % (index) + " "
 
-            for subject, test, value in self.tests:
-                if self.runTestOnCols(test, matrix):
+            for subject, test, value in verticalTests:
+                if test(verticalTestGroup):
                     conclusion += "Columns: %s" % (subject) + " "
                     score += value
                     break
 
-            for subject, test, value in self.tests:
-                if self.runTestOnRows(test, matrix):
+            for subject, test, value in horizontalTests:
+                if test(horizontalTestGroup):
                     conclusion += "Rows: %s" % (subject)
                     score += value
                     break

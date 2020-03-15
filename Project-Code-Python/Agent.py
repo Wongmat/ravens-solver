@@ -17,10 +17,13 @@ class Agent:
             ("Unknown", self.checkUnknown, 0),
         ]
 
-    def initTests(self, staticGroup):
+    def darknessRatio(self, img):
+        print(np.array(img))
+
+    def initTests(self, staticGroups):
         viable_tests = []
         for category, test, value in self.tests:
-            testTestingGroup = test(staticGroup)
+            testTestingGroup = test(staticGroups)
             if testTestingGroup is not None:
                 viable_tests.append((category, testTestingGroup, value))
         return viable_tests
@@ -30,21 +33,29 @@ class Agent:
         return image.point(lambda x: 0 if x < 100 else 255, '1')
 
     def getImages(self, problem):
-        figures = problem.figures.items()
+        figures = sorted(problem.figures.items())
         probImgs = []
         ansImgs = []
 
-        for figure in figures:
-            key = figure[0]
-            fileName = figure[1].visualFilename
+        for key, obj in figures:
+            fileName = obj.visualFilename
             img = self.blackAndWhite(Image.open(fileName))
             if key.isalpha():
-                probImgs.append((key, img))
+                probImgs.append(img)
             else:
                 ansImgs.append((key, img))
-        probImgs.sort(key=lambda entry: entry[0])
-        ansImgs.sort(key=lambda entry: entry[0])
-        return probImgs, ansImgs
+
+        return np.array(probImgs, dtype='object'), ansImgs
+
+    def getRowsAndCols(self, probImgs):
+        probImgs = np.append(probImgs, None)
+        row_splits = np.split(probImgs, math.sqrt(probImgs.size))
+        col_splits = np.transpose(row_splits)
+        rows = row_splits[:-1]
+        cols = col_splits[:-1]
+        test_row = row_splits[-1][:-1]
+        test_col = col_splits[-1][:-1]
+        return rows, cols, test_row, test_col
 
     def getHistogramCorrelation(self, img1, img2):
         hist1 = img1.histogram()
@@ -75,12 +86,14 @@ class Agent:
                 return False
         return True
 
-    def checkIdentical(self, staticGroup):
-        if self.groupIsIdentical(staticGroup):
-            def testTestingGroup(testingGroup):
-                return self.groupIsIdentical(testingGroup)
-            return testTestingGroup
-        return None
+    def checkIdentical(self, staticGroups):
+        for group in staticGroups:
+            if not self.groupIsIdentical(group):
+                return None
+
+        def testTestingGroup(testingGroup):
+            return self.groupIsIdentical(testingGroup)
+        return testTestingGroup
 
     def isInverted(self, group):
         for x in range(0, len(group) - 1):
@@ -121,12 +134,14 @@ class Agent:
                 return False
         return True
 
-    def checkInverted(self, staticGroup):
-        if self.isInverted(staticGroup):
-            def testTestingGroup(testingGroup):
-                return self.isInverted(testingGroup)
-            return testTestingGroup
-        return None
+    def checkInverted(self, staticGroups):
+        for group in staticGroups:
+            if not self.isInverted(group):
+                return None
+
+        def testTestingGroup(testingGroup):
+            return self.isInverted(testingGroup)
+        return testTestingGroup
 
     def isMirrored(self, group, direction):
         for x in range(0, len(group) - 1):
@@ -137,11 +152,18 @@ class Agent:
                 return False
         return True
 
-    def checkMirrored(self, staticGroup):
+    def checkMirrored(self, staticGroups):
         directions = [Image.FLIP_TOP_BOTTOM, Image.FLIP_LEFT_RIGHT]
 
-        viable_directions = [direction for direction in directions if
-                             self.isMirrored(staticGroup, direction)]
+        viable_directions = []
+        for direction in directions:
+            applicable = True
+            for group in staticGroups:
+                if not self.isMirrored(group, direction):
+                    applicable = False
+                    break
+            if applicable:
+                viable_directions.append(direction)
 
         if len(viable_directions) == 0:
             return None
@@ -165,13 +187,21 @@ class Agent:
                 return True
             return False
 
-    def checkRotated(self, staticGroup):
+    def checkRotated(self, staticGroups):
         rotations = [Image.ROTATE_90,
                      Image.ROTATE_180,
                      Image.ROTATE_270
                      ]
-        viable_rotations = [rotation for rotation in rotations if
-                            self.isRotated(staticGroup, rotation)]
+
+        viable_rotations = []
+        for rotation in rotations:
+            applicable = True
+            for group in staticGroups:
+                if not self.isRotated(group, rotation):
+                    applicable = False
+                    break
+            if applicable:
+                viable_rotations.append(rotation)
 
         if len(viable_rotations) == 0:
             return None
@@ -194,18 +224,19 @@ class Agent:
         diff = ImageChops.difference(img1, img2)
         return diff.filter(ImageFilter.ModeFilter)
 
-    def checkChanged(self, staticGroup):
-        firstImg = staticGroup[0]
-        secondImg = staticGroup[1]
-        base_diff = self.getDiff(firstImg, secondImg)
+    def checkChanged(self, staticGroups):
+        for group in staticGroups:
+            firstImg = group[0]
+            secondImg = group[1]
+            base_diff = self.getDiff(firstImg, secondImg)
 
-        for x in range(2, len(staticGroup) - 1):
-            img1 = staticGroup[x]
-            img2 = staticGroup[x + 1]
+            for x in range(2, len(group) - 1):
+                img1 = group[x]
+                img2 = group[x + 1]
 
-            diff = self.getDiff(img1, img2)
-            if self.getHistogramCorrelation(diff, base_diff) <= 0.999:
-                return None
+                diff = self.getDiff(img1, img2)
+                if self.getHistogramCorrelation(diff, base_diff) <= 0.999:
+                    return None
 
         def testTestingGroup(testingGroup):
             for x in range(0, len(testingGroup) - 1):
@@ -223,43 +254,33 @@ class Agent:
         return lambda testingGroup: True
 
     def Solve(self, problem):
-        if "Problem B" not in problem.name:
-            return -1
+        # if "Problem C" not in problem.name:
+        #    return -1
         print(problem.name)
         probImgs, ansImgs = self.getImages(problem)
         bestScore = -99999
         bestCandidate = 1
+        rows, cols, test_row, test_col = self.getRowsAndCols(probImgs)
 
-        horizontalStaticGroup = [probImgs[i][1]
-                                 for i in range(len(probImgs))
-                                 if i < math.ceil(len(probImgs) / 2)]
-        horizontalTests = self.initTests(horizontalStaticGroup)
-
-        verticalStaticGroup = [probImgs[i][1]
-                               for i in range(len(probImgs)) if i % 2 == 0]
-        verticalTests = self.initTests(verticalStaticGroup)
+        horizontalTests = self.initTests(rows)
+        verticalTests = self.initTests(cols)
 
         for index, candidate in ansImgs:
-            matrix = probImgs[:]
-            matrix.append((index, candidate))
-            horizontalTestGroup = [matrix[i][1] for i in range(
-                len(matrix)) if i >= math.ceil(len(matrix) / 2)]
-
-            verticalTestGroup = [matrix[i][1] for i in range(
-                len(matrix)) if i % 2 != 0]
-
+            col_to_test = list(test_col)
+            row_to_test = list(test_row)
+            col_to_test.append(candidate)
+            row_to_test.append(candidate)
             score = 0
 
             conclusion = "Conclusion for %s:" % (index) + " "
-
             for subject, test, value in verticalTests:
-                if test(verticalTestGroup):
+                if test(col_to_test):
                     conclusion += "Columns: %s" % (subject) + " "
                     score += value
                     break
 
             for subject, test, value in horizontalTests:
-                if test(horizontalTestGroup):
+                if test(row_to_test):
                     conclusion += "Rows: %s" % (subject)
                     score += value
                     break

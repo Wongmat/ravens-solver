@@ -17,8 +17,25 @@ class Agent:
             ("Unknown", self.checkUnknown, 0),
         ]
 
-    def darknessRatio(self, img):
-        print(np.array(img))
+    def darknessRatio(self, img1, img2):
+        arr = np.asarray(img1, dtype="int64")
+        arr2 = np.asarray(img2, dtype="int64")
+        size1 = arr.size
+        size2 = arr2.size
+        count1 = np.count_nonzero(arr != 1)
+        count2 = np.count_nonzero(arr2 != 1)
+        ratio1 = count1 / size1
+        ratio2 = count2 / size2
+        return ratio1 - ratio2
+
+    def pixelIntersect(self, img1, img2):
+        union = ImageChops.logical_and(img1, img2)
+        intersect = ImageChops.logical_or(img1, img2)
+        union_arr = np.asarray(union, dtype="int64")
+        intersect_arr = np.asarray(intersect, dtype="int64")
+        intersections = np.count_nonzero(intersect_arr != 1)
+        totalDark = np.count_nonzero(union_arr != 1)
+        return intersections / totalDark
 
     def initTests(self, staticGroups):
         viable_tests = []
@@ -41,11 +58,35 @@ class Agent:
             fileName = obj.visualFilename
             img = self.blackAndWhite(Image.open(fileName))
             if key.isalpha():
-                probImgs.append(img)
+                probImgs.append((key, img))
             else:
                 ansImgs.append((key, img))
 
-        return np.array(probImgs, dtype='object'), ansImgs
+        return np.array(probImgs, dtype='U1, object'), ansImgs
+
+    def getPairs(self, probImgs):
+        probImgs = np.append(probImgs, None)
+        shape = (int(math.sqrt(probImgs.size)), int(math.sqrt(probImgs.size)))
+        matrix = np.reshape(probImgs, shape)
+        horPairs = []
+        vertPairs = []
+        horTester = None
+        vertTester = None
+        for row in matrix:
+            for i in range(row.size - 1):
+                if row[i + 1] is None:
+                    horTester = row[i]
+                else:
+                    horPairs.append((row[i], row[i + 1]))
+
+        for col in matrix.T:
+            for i in range(col.size - 1):
+                if col[i + 1] is None:
+                    vertTester = col[i]
+                else:
+                    vertPairs.append((col[i], col[i + 1]))
+
+        return horPairs, horTester, vertPairs, vertTester
 
     def getRowsAndCols(self, probImgs):
         probImgs = np.append(probImgs, None)
@@ -254,47 +295,121 @@ class Agent:
         return lambda testingGroup: True
 
     def Solve(self, problem):
-        # if "Problem C" not in problem.name:
+        # if "Basic Problem C" not in problem.name:
         #    return -1
         print(problem.name)
         probImgs, ansImgs = self.getImages(problem)
-        bestScore = -99999
-        bestCandidate = 1
-        rows, cols, test_row, test_col = self.getRowsAndCols(probImgs)
+        horPairs, horTester, vertPairs, vertTester = self.getPairs(probImgs)
 
-        horizontalTests = self.initTests(rows)
-        verticalTests = self.initTests(cols)
+        horTestPairs = [(self.pixelIntersect(img1[1], img2[1]), self.darknessRatio(
+            img1[1], img2[1])) for (img1, img2) in horPairs]
 
-        for index, candidate in ansImgs:
-            col_to_test = list(test_col)
-            row_to_test = list(test_row)
-            col_to_test.append(candidate)
-            row_to_test.append(candidate)
-            score = 0
+        vertTestPairs = [(self.pixelIntersect(img1[1], img2[1]),
+                          self.darknessRatio(
+            img1[1], img2[1])) for (img1, img2) in vertPairs]
 
-            conclusion = "Conclusion for %s:" % (index) + " "
-            for subject, test, value in verticalTests:
-                if test(col_to_test):
-                    conclusion += "Columns: %s" % (subject) + " "
-                    score += value
-                    break
+        horAnsPairs = [(key, self.pixelIntersect(horTester[1], candidate),
+                        self.darknessRatio(horTester[1], candidate)) for (key, candidate) in ansImgs]
 
-            for subject, test, value in horizontalTests:
-                if test(row_to_test):
-                    conclusion += "Rows: %s" % (subject)
-                    score += value
-                    break
+        vertAnsPairs = [(key, self.pixelIntersect(vertTester[1], candidate),
+                         self.darknessRatio(vertTester[1], candidate)) for (key, candidate) in ansImgs]
 
-            print(conclusion)
+        scores = {key: 0 for (key, image) in ansImgs}
+        for (intersect, darkness) in horTestPairs:
+            similarities = []
+            print('horizontal')
+            for (key, candidateIntersect, candidateDarkness) in horAnsPairs:
+                intDiff = abs(
+                    candidateIntersect - intersect)
+                darkDiff = abs(
+                    candidateDarkness - darkness)
 
-            if score > bestScore:
-                print("New best candidate: %s, with a score of %d. " %
-                      (index, score) +
-                      " Old best candidate was %d with a best score of %d." %
-                      (bestCandidate, (0, bestScore)[bestScore >= 0]))
-                bestScore = score
-                bestCandidate = int(index)
+                similarities.append([key, intDiff, darkDiff])
 
-        print("Final solution for " + problem.name +
-              ": " + str(bestCandidate) + "\n")
-        return bestCandidate
+            for x in range(1, 3):
+                similarities.sort(key=lambda score: score[x], reverse=True)
+                for i, candidate in enumerate(similarities):
+                    key = candidate[0]
+                    scores[key] += i
+            print(similarities)
+
+        for (intersect, darkness) in vertTestPairs:
+            similarities = []
+            print('vertical')
+            for (key, candidateIntersect, candidateDarkness) in vertAnsPairs:
+                intDiff = abs(
+                    candidateIntersect - intersect)
+                darkDiff = abs(
+                    candidateDarkness - darkness)
+
+                similarities.append([key, intDiff, darkDiff])
+
+            for x in range(1, 3):
+                similarities.sort(key=lambda score: score[x], reverse=True)
+                for i, candidate in enumerate(similarities):
+                    key = candidate[0]
+                    scores[key] += i
+            print(scores)
+            print(similarities)
+        bestCandidates = [
+            key for key, value in scores.items()
+            if value == max(scores.values())]
+
+        if len(bestCandidates) > 1:
+            print(bestCandidates[1])
+            return int(bestCandidates[1])
+
+        else:
+            print(bestCandidates[0])
+            return int(bestCandidates[0])
+        # for x in range(1, 4):
+        #     scores.sort(key=lambda score: score[x], reverse=True)
+        # for i, candidate in enumerate(scores):
+        #     candidate[5] += i
+        # print(bestCandidates[0])
+        # return int(bestCandidates[0])
+        # scores.sort(key=lambda score: score[5], reverse=True)
+        # print(scores, scores[0][0])
+        # return int(scores[0][0])
+        # for key, img in ansImgs:
+        #     print(key, self.darknessRatio(img))
+        # bestScore = -99999
+        # bestCandidate = 1
+        # rows, cols, test_row, test_col = self.getRowsAndCols(probImgs)
+
+        # horizontalTests = self.initTests(rows)
+        # verticalTests = self.initTests(cols)
+
+        # for index, candidate in ansImgs:
+        #     col_to_test = list(test_col)
+        #     row_to_test = list(test_row)
+        #     col_to_test.append(candidate)
+        #     row_to_test.append(candidate)
+        #     score = 0
+
+        #     conclusion = "Conclusion for %s:" % (index) + " "
+        #     for subject, test, value in verticalTests:
+        #         if test(col_to_test):
+        #             conclusion += "Columns: %s" % (subject) + " "
+        #             score += value
+        #             break
+
+        #     for subject, test, value in horizontalTests:
+        #         if test(row_to_test):
+        #             conclusion += "Rows: %s" % (subject)
+        #             score += value
+        #             break
+
+        #     print(conclusion)
+
+        #     if score > bestScore:
+        #         print("New best candidate: %s, with a score of %d. " %
+        #               (index, score) +
+        #               " Old best candidate was %d with a best score of %d." %
+        #               (bestCandidate, (0, bestScore)[bestScore >= 0]))
+        #         bestScore = score
+        #         bestCandidate = int(index)
+
+        # print("Final solution for " + problem.name +
+        #       ": " + str(bestCandidate) + "\n")
+        # return bestCandidate

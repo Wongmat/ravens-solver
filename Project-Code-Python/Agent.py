@@ -68,14 +68,29 @@ class Agent:
 
         return pairs
 
+    def getDiagonals(self, matrix):
+        rows, cols = matrix.shape
+        if rows < 3 & cols < 3:
+            return []
+        else:
+            diagonals = []
+            diagonals.append(matrix.diagonal())
+            for x in range(1, cols - 1):
+                right_diag = matrix.diagonal(offset=x)
+                left_diag = matrix.diagonal(offset=(x * -1))
+                diagonals.append(right_diag)
+                diagonals.append(left_diag)
+            return diagonals
+
     def getPairs(self, probImgs, ansImgs):
         probImgs = np.append(probImgs, None)
         degree = int(math.sqrt(probImgs.size))
         shape = (degree, degree)
         matrix = np.reshape(probImgs, shape)
-        testPairs = {'horizontal': [], 'vertical': []}
+        testPairs = {'horizontal': [], 'vertical': [], 'diagonal': []}
         vTester = None
         hTester = None
+        dTester = None
 
         for row in matrix:
             for i in range(row.size - 1):
@@ -97,13 +112,26 @@ class Agent:
                     pair = Pair(key1, img1, key2, img2)
                     testPairs['vertical'].append(pair)
 
+        diagonals = self.getDiagonals(matrix)
+        for diag in diagonals:
+            for i in range(diag.size - 1):
+                key1, img1 = diag[i]
+                if diag[i + 1] is None:
+                    dTester = diag[i]
+                else:
+                    key2, img2 = diag[i + 1]
+                    pair = Pair(key1, img1, key2, img2)
+                    testPairs['diagonal'].append(pair)
+
         vKey1, vImg1 = vTester
         hKey1, hImg1 = hTester
-        candidatePairs = {'horizontal': [], 'vertical': []}
+        dKey1, dImg1 = dTester
+        candidatePairs = {'horizontal': [], 'vertical': [], 'diagonal': []}
 
         for key2, img2 in ansImgs:
             candidatePairs['horizontal'].append(Pair(hKey1, hImg1, key2, img2))
             candidatePairs['vertical'].append(Pair(vKey1, vImg1, key2, img2))
+            candidatePairs['diagonal'].append(Pair(dKey1, dImg1, key2, img2))
 
         return testPairs, candidatePairs
 
@@ -111,12 +139,14 @@ class Agent:
         def runTests(pairs): return self.darknessRatio(
             self.pixelIntersectRatio(pairs))
 
-       #  if "Basic Problem B" not in problem.name and "Basic Problem C" not in problem.name:
-        #     return -1
+        # if "Basic Problem D-01" not in problem.name:
+        #   return -1
         print(problem.name)
         probImgs, ansImgs = self.getImages(problem)
         testingPairs, candidatePairs = self.getPairs(probImgs, ansImgs)
         scores = {key: 0 for key, img in ansImgs}
+
+        print(testingPairs, candidatePairs)
 
         for direction in testingPairs.keys():
             testingList = testingPairs[direction]

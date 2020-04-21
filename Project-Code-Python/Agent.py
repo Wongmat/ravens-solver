@@ -15,7 +15,7 @@ class Pair:
         self.score = 0
 
     def __repr__(self):
-        return "% s - % s | Diffs: % s" % (self.key1, self.key2, self.diffs)
+        return "<% s - % s | Diffs: % s | TestRes: % s>" % (self.key1, self.key2, self.diffs, self.testResults)
 
 
 class Agent:
@@ -41,6 +41,19 @@ class Agent:
     def calcDarknessRatio(self, img1, img2):
         arr = np.asarray(img1, dtype="int64")
         arr2 = np.asarray(img2, dtype="int64")
+        count1 = np.count_nonzero(arr != 1)
+        count2 = np.count_nonzero(arr2 != 1)
+        return count1 / count2
+
+    def darknessRatio(self, pairs):
+        for pair in pairs:
+            ratio = self.calcDarknessRatio(pair.img1, pair.img2)
+            pair.testResults['darkness_ratio'] = ratio
+        return pairs
+
+    def calcDarkDiff(self, img1, img2):
+        arr = np.asarray(img1, dtype="int64")
+        arr2 = np.asarray(img2, dtype="int64")
         size1 = arr.size
         size2 = arr2.size
         count1 = np.count_nonzero(arr != 1)
@@ -49,26 +62,10 @@ class Agent:
         ratio2 = count2 / size2
         return ratio1 - ratio2
 
-    def darknessRatio(self, pairs):
+    def darkDiff(self, pairs):
         for pair in pairs:
-            ratio = self.calcDarknessRatio(pair.img1, pair.img2)
-            pair.testResults['darkness_ratio'] = ratio
-        return pairs
-
-    def normalize(self, pairs):
-        first_pair = pairs[0]
-        tests = first_pair.testResults.keys()
-        totals = dict.fromkeys(tests, 0)
-
-        for pair in pairs:
-            results = pair.testResults
-            for test in tests:
-                totals[test] += results[test]
-
-        for pair in pairs:
-            results = pair.testResults
-            for test in tests:
-                results[test] /= 1 if totals[test] == 0 else totals[test]
+            ratio = self.calcDarkDiff(pair.img1, pair.img2)
+            pair.testResults['dark_diff'] = ratio
         return pairs
 
     def calcPixelIntersectRatio(self, img1, img2):
@@ -84,6 +81,21 @@ class Agent:
         for pair in pairs:
             ratio = self.calcPixelIntersectRatio(pair.img1, pair.img2)
             pair.testResults['pixel_intersect'] = ratio
+
+        return pairs
+
+    def calcNonMatchingPixelRatio(self, img1, img2):
+        xor = ImageChops.logical_xor(img1, img2)
+        inverted = ImageChops.invert(xor)
+        inverted_arr = np.asarray(inverted, dtype="int64")
+        nonmatching = np.count_nonzero(inverted_arr != 1)
+        totalPixels = inverted_arr.size
+        return nonmatching / totalPixels
+
+    def nonMatchingPixelRatio(self, pairs):
+        for pair in pairs:
+            ratio = self.calcNonMatchingPixelRatio(pair.img1, pair.img2)
+            pair.testResults['non_matching_pixel'] = ratio
 
         return pairs
 
@@ -106,30 +118,52 @@ class Agent:
         degree = int(math.sqrt(probImgs.size))
         shape = (degree, degree)
         matrix = np.reshape(probImgs, shape)
-        testPairs = {'horizontal': [], 'vertical': [], 'diagonal': []}
+        testPairs = {'horizontal': [], 'horizontal2': [],
+                     'vertical': [], 'vertical2': [], 'diagonal': []}
         vTester = None
+        v2Tester = None
         hTester = None
+        h2Tester = None
         dTester = None
 
         for row in matrix:
             for i in range(row.size - 1):
+                opposite = row.size - 1 - i
                 key1, img1 = row[i]
                 if row[i + 1] is None:
                     hTester = row[i]
+
+                elif row[opposite] is None:
+                    h2Tester = row[i]
+
                 else:
                     key2, img2 = row[i + 1]
                     pair = Pair(key1, img1, key2, img2)
                     testPairs['horizontal'].append(pair)
 
+                    if opposite > i:
+                        h2_key2, h2_img2 = row[opposite]
+                        h2_pair = Pair(key1, img1, h2_key2, h2_img2)
+                        testPairs['horizontal2'].append(h2_pair)
+
         for col in matrix.T:
             for i in range(col.size - 1):
+                opposite = col.size - 1 - i
                 key1, img1 = col[i]
                 if col[i + 1] is None:
                     vTester = col[i]
+
+                elif col[opposite] is None:
+                    v2Tester = col[i]
                 else:
                     key2, img2 = col[i + 1]
                     pair = Pair(key1, img1, key2, img2)
                     testPairs['vertical'].append(pair)
+
+                    if opposite > i:
+                        v2_key2, v2_img2 = col[opposite]
+                        v2_pair = Pair(key1, img1, v2_key2, v2_img2)
+                        testPairs['vertical2'].append(v2_pair)
 
         diagonals = self.getDiagonals(matrix)
         for diag in diagonals:
@@ -145,27 +179,43 @@ class Agent:
         vKey1, vImg1 = vTester
         hKey1, hImg1 = hTester
         dKey1, dImg1 = dTester
-        candidatePairs = {'horizontal': [], 'vertical': [], 'diagonal': []}
+
+        candidatePairs = {'horizontal': [], 'horizontal2': [],
+                          'vertical': [], 'vertical2': [], 'diagonal': []}
 
         for key2, img2 in ansImgs:
             candidatePairs['horizontal'].append(Pair(hKey1, hImg1, key2, img2))
+
             candidatePairs['vertical'].append(Pair(vKey1, vImg1, key2, img2))
+
             candidatePairs['diagonal'].append(Pair(dKey1, dImg1, key2, img2))
 
-        if not testPairs['diagonal']:
-            del candidatePairs['diagonal']
-            del testPairs['diagonal']
+            if v2Tester:
+                h2Key1, h2Img1 = h2Tester
+                v2Key1, v2Img1 = v2Tester
+                candidatePairs['horizontal2'].append(
+                    Pair(h2Key1, h2Img1, key2, img2))
+
+                candidatePairs['vertical2'].append(
+                    Pair(v2Key1, v2Img1, key2, img2))
+
+        for key in list(testPairs.keys())[:]:
+            if not testPairs[key]:
+                del candidatePairs[key]
+                del testPairs[key]
 
         return testPairs, candidatePairs
 
     def Solve(self, problem):
-        def runTests(pairs): return self.darknessRatio(
-            self.pixelIntersectRatio(pairs))
+        def runTests(pairs): return self.pixelIntersectRatio(
+            self.darkDiff(pairs))
 
-        # if "Basic Problem C-03" not in problem.name:
-        # return -1
+        # if "Basic Problem E-01" not in problem.name:
+        #    return -1
         print(problem.name)
         probImgs, ansImgs = self.getImages(problem)
+        # xor = ImageChops.logical_xor(probImgs[0][1], probImgs[1][1])
+        # xor.show()
         testingPairs, candidatePairs = self.getPairs(probImgs, ansImgs)
         scores = dict.fromkeys([key for key, _ in ansImgs], 0)
 
@@ -181,8 +231,11 @@ class Agent:
 
             for test, _ in tests:
                 total = 0
-
+                # print(test, ': ')
                 for candidate in candidatePairList:
+
+                    # if (candidate.key1 == 'F') & (candidate.key2 == '1'):
+                     #   self.calcDarknessRatio2(candidate.img1, candidate.img2)
 
                     result = candidate.testResults[test]
                     candidate.diffs[test] = 0
@@ -192,12 +245,15 @@ class Agent:
                         candidate.diffs[test] += diff
                         total += diff
 
+                # print('BEFORE: ', candidatePairList, '\n')
                 normalized = candidatePairList[:]
                 for candidate in normalized:
                     candidate.diffs[test] = 0 if total == 0 else (
                         candidate.diffs[test] / total)
                     scores[candidate.key2] += candidate.diffs[test]
 
+                # print('AFTER: ', normalized, '\n')
+                # print('TEST PAIRS: ', testingPairList, '\n')
                 candidatePairList = normalized
 
         scoresList = list(scores.items())

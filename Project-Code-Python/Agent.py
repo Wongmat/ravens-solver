@@ -207,8 +207,8 @@ class Agent:
         return testPairs, candidatePairs
 
     def Solve(self, problem):
-        def runTests(pairs): return self.pixelIntersectRatio(
-            self.darkDiff(pairs))
+        def runTests(pairs): return self.darkDiff(self.pixelIntersectRatio(
+            self.nonMatchingPixelRatio(pairs)))
 
         # if "Basic Problem E-01" not in problem.name:
         #    return -1

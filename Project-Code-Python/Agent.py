@@ -14,6 +14,9 @@ class Pair:
         self.diffs = {}
         self.score = 0
 
+    def __repr__(self):
+        return "% s - % s | Diffs: % s" % (self.key1, self.key2, self.diffs)
+
 
 class Agent:
     def blackAndWhite(self, image):
@@ -50,6 +53,22 @@ class Agent:
         for pair in pairs:
             ratio = self.calcDarknessRatio(pair.img1, pair.img2)
             pair.testResults['darkness_ratio'] = ratio
+        return pairs
+
+    def normalize(self, pairs):
+        first_pair = pairs[0]
+        tests = first_pair.testResults.keys()
+        totals = dict.fromkeys(tests, 0)
+
+        for pair in pairs:
+            results = pair.testResults
+            for test in tests:
+                totals[test] += results[test]
+
+        for pair in pairs:
+            results = pair.testResults
+            for test in tests:
+                results[test] /= 1 if totals[test] == 0 else totals[test]
         return pairs
 
     def calcPixelIntersectRatio(self, img1, img2):
@@ -133,20 +152,22 @@ class Agent:
             candidatePairs['vertical'].append(Pair(vKey1, vImg1, key2, img2))
             candidatePairs['diagonal'].append(Pair(dKey1, dImg1, key2, img2))
 
+        if not testPairs['diagonal']:
+            del candidatePairs['diagonal']
+            del testPairs['diagonal']
+
         return testPairs, candidatePairs
 
     def Solve(self, problem):
         def runTests(pairs): return self.darknessRatio(
             self.pixelIntersectRatio(pairs))
 
-        # if "Basic Problem D-01" not in problem.name:
-        #   return -1
+        # if "Basic Problem C-03" not in problem.name:
+        # return -1
         print(problem.name)
         probImgs, ansImgs = self.getImages(problem)
         testingPairs, candidatePairs = self.getPairs(probImgs, ansImgs)
-        scores = {key: 0 for key, img in ansImgs}
-
-        print(testingPairs, candidatePairs)
+        scores = dict.fromkeys([key for key, _ in ansImgs], 0)
 
         for direction in testingPairs.keys():
             testingList = testingPairs[direction]
@@ -154,27 +175,33 @@ class Agent:
             runTests(testingList)
             runTests(candidateList)
 
-        for direction, testingPairList in testingPairs.items():
-            candidatePairList = candidatePairs[direction]
+        for direction, candidatePairList in candidatePairs.items():
+            testingPairList = testingPairs[direction]
+            tests = testingPairList[0].testResults.items()
 
-            for testPair in testingPairList:
-                print(direction, ': ', testPair.key1, '-', testPair.key2, '\n')
-                for testName, result in testPair.testResults.items():
-                    for candidate in candidatePairList:
-                        candidateResult = candidate.testResults[testName]
-                        diff = abs(result - candidateResult)
-                        candidate.diffs[testName] = diff
+            for test, _ in tests:
+                total = 0
 
-                    candidatePairList.sort(
-                        key=lambda pair: pair.diffs[testName], reverse=True)
+                for candidate in candidatePairList:
 
-                    for index, pair in reversed(list(
-                            enumerate(candidatePairList))):
-                        scores[pair.key2] += 0.75 * \
-                            index if testName == 'darkness_ratio' else index
+                    result = candidate.testResults[test]
+                    candidate.diffs[test] = 0
+                    for testPair in testingPairList:
+                        testingResult = testPair.testResults[test]
+                        diff = abs(result - testingResult)
+                        candidate.diffs[test] += diff
+                        total += diff
 
-            scoresList = list(scores.items())
-            scoresList.sort(key=lambda entry: entry[1], reverse=True)
+                normalized = candidatePairList[:]
+                for candidate in normalized:
+                    candidate.diffs[test] = 0 if total == 0 else (
+                        candidate.diffs[test] / total)
+                    scores[candidate.key2] += candidate.diffs[test]
+
+                candidatePairList = normalized
+
+        scoresList = list(scores.items())
+        scoresList.sort(key=lambda entry: entry[1], reverse=False)
 
         print("BEST: ", scoresList[0][0], " SCORE: ", scoresList[0][1])
         print("RUNNER UP: ", scoresList[1]

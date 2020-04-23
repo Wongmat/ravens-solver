@@ -30,14 +30,20 @@ class Relation:
     def __init__(self, testerPair, candidatePair):
         self.testerPair = testerPair
         self.candidatePair = candidatePair
-        self.diffs = {}
+        self.diffs = []
+        self.normalized_diffs = []
+        self.type = testerPair.type
+        self.direction = testerPair.direction
+
+    def __repr__(self):
+        return "<Relation % s - % s >" % (self.testerPair, self.candidatePair)
 
     def calculate_diffs(self):
         for key in self.testerPair.testResults.keys():
             tester_pair = self.testerPair.testResults[key]
             candidate_pair = self.candidatePair.testResults[key]
             diff = abs(tester_pair - candidate_pair)
-            self.diffs[key] = diff
+            self.diffs.append((key, diff))
 
 
 class Element:
@@ -58,6 +64,9 @@ class Candidate(Element):
         self.score = 0
         self.pairs = []
         self.relations = []
+
+    def __repr__(self):
+        return "<% s - KEY: % s>(% s)" % (type(self).__name__, self.key, self.score)
 
     def add_pair(self, pair):
         self.pairs.append(pair)
@@ -135,6 +144,11 @@ class Agent:
                 diagonals[pair_type]['diagonal'].append(diag1_pair)
                 diagonals[pair_type]['diagonal'].append(diag2_pair)
 
+        diag3 = matrix[[1, 2, 0], [2, 1, 0]]
+        diag4 = [[2, 0, 1], [0, 2, 1]]
+        diag5 = [[0, 1, 2], [1, 0, 2]]
+        print(diag3, diag4, diag5)
+
         return lonelyTesters, diagonals
 
     def getTesterPairs(self, testers):
@@ -171,7 +185,7 @@ class Agent:
                     pair = Pair(tester1, 'adjacent', 'horizontal', tester2)
                     adjacent['horizontal'].append(pair)
 
-                    if opposite > i:
+                    if opposite > i and degree > 2:
                         separated = testerPairs['separated']
                         sep_tester = row[opposite]
                         sep_pair = Pair(tester1, 'separated',
@@ -200,7 +214,7 @@ class Agent:
                     pair = Pair(tester1, 'adjacent', 'vertical', tester2)
                     adjacent['vertical'].append(pair)
 
-                    if opposite > i:
+                    if opposite > i and degree > 2:
                         separated = testerPairs['separated']
                         sep_tester = col[opposite]
                         sep_pair = Pair(tester1, 'separated',
@@ -218,13 +232,9 @@ class Agent:
         arr2 = np.asarray(img2, dtype="int64")
         count1 = np.count_nonzero(arr != 1)
         count2 = np.count_nonzero(arr2 != 1)
+        if count2 == 0:
+            count2 = 1
         return ('darkness_ratio', count1 / count2)
-
-    def darknessRatio(self, pairs):
-        for pair in pairs:
-            ratio = self.calcDarknessRatio(pair.img1, pair.img2)
-            pair.testResults['darkness_ratio'] = ratio
-        return pairs
 
     def calcDarkDiff(self, img1, img2):
         arr = np.asarray(img1, dtype="int64")
@@ -237,12 +247,6 @@ class Agent:
         ratio2 = count2 / size2
         return ('dark_diff', ratio1 - ratio2)
 
-    def darkDiff(self, pairs):
-        for pair in pairs:
-            ratio = self.calcDarkDiff(pair.img1, pair.img2)
-            pair.testResults['dark_diff'] = ratio
-        return pairs
-
     def calcPixelIntersectRatio(self, img1, img2):
         union = ImageChops.logical_and(img1, img2)
         intersect = ImageChops.logical_or(img1, img2)
@@ -250,14 +254,9 @@ class Agent:
         intersect_arr = np.asarray(intersect, dtype="int64")
         intersections = np.count_nonzero(intersect_arr != 1)
         totalDark = np.count_nonzero(union_arr != 1)
+        if totalDark == 0:
+            totalDark = 1
         return ('pixel_intersect', intersections / totalDark)
-
-    def pixelIntersectRatio(self, pairs):
-        for pair in pairs:
-            ratio = self.calcPixelIntersectRatio(pair.img1, pair.img2)
-            pair.testResults['pixel_intersect'] = ratio
-
-        return pairs
 
     def calcNonMatchingPixelRatio(self, img1, img2):
         xor = ImageChops.logical_xor(img1, img2)
@@ -266,13 +265,6 @@ class Agent:
         nonmatching = np.count_nonzero(inverted_arr != 1)
         totalPixels = inverted_arr.size
         return ('non_matching_pixel', nonmatching / totalPixels)
-
-    def nonMatchingPixelRatio(self, pairs):
-        for pair in pairs:
-            ratio = self.calcNonMatchingPixelRatio(pair.img1, pair.img2)
-            pair.testResults['non_matching_pixel'] = ratio
-
-        return pairs
 
     def getDiagonals(self, matrix):
         rows, cols = matrix.shape
@@ -288,107 +280,17 @@ class Agent:
                 diagonals.append(left_diag)
             return diagonals
 
-    def getPairs(self, probImgs, ansImgs):
-        probImgs = np.append(probImgs, None)
-        degree = int(math.sqrt(probImgs.size))
-        shape = (degree, degree)
-        matrix = np.reshape(probImgs, shape)
-        testPairs = {'horizontal': [], 'horizontal2': [],
-                     'vertical': [], 'vertical2': [], 'diagonal': []}
-        vTester = None
-        v2Tester = None
-        hTester = None
-        h2Tester = None
-        dTester = None
-
-        for row in matrix:
-            for i in range(row.size - 1):
-                opposite = row.size - 1 - i
-                key1, img1 = row[i]
-                if row[i + 1] is None:
-                    hTester = row[i]
-
-                elif row[opposite] is None:
-                    h2Tester = row[i]
-
-                else:
-                    key2, img2 = row[i + 1]
-                    pair = Pair(key1, img1, key2, img2)
-                    testPairs['horizontal'].append(pair)
-
-                    if opposite > i:
-                        h2_key2, h2_img2 = row[opposite]
-                        h2_pair = Pair(key1, img1, h2_key2, h2_img2)
-                        testPairs['horizontal2'].append(h2_pair)
-
-        for col in matrix.T:
-            for i in range(col.size - 1):
-                opposite = col.size - 1 - i
-                key1, img1 = col[i]
-                if col[i + 1] is None:
-                    vTester = col[i]
-
-                elif col[opposite] is None:
-                    v2Tester = col[i]
-                else:
-                    key2, img2 = col[i + 1]
-                    pair = Pair(key1, img1, key2, img2)
-                    testPairs['vertical'].append(pair)
-
-                    if opposite > i:
-                        v2_key2, v2_img2 = col[opposite]
-                        v2_pair = Pair(key1, img1, v2_key2, v2_img2)
-                        testPairs['vertical2'].append(v2_pair)
-
-        diagonals = self.getDiagonals(matrix)
-        for diag in diagonals:
-            for i in range(diag.size - 1):
-                key1, img1 = diag[i]
-                if diag[i + 1] is None:
-                    dTester = diag[i]
-                else:
-                    key2, img2 = diag[i + 1]
-                    pair = Pair(key1, img1, key2, img2)
-                    testPairs['diagonal'].append(pair)
-
-        vKey1, vImg1 = vTester
-        hKey1, hImg1 = hTester
-        dKey1, dImg1 = dTester
-
-        candidatePairs = {'horizontal': [], 'horizontal2': [],
-                          'vertical': [], 'vertical2': [], 'diagonal': []}
-
-        for key2, img2 in ansImgs:
-            candidatePairs['horizontal'].append(Pair(hKey1, hImg1, key2, img2))
-
-            candidatePairs['vertical'].append(Pair(vKey1, vImg1, key2, img2))
-
-            candidatePairs['diagonal'].append(Pair(dKey1, dImg1, key2, img2))
-
-            if v2Tester:
-                h2Key1, h2Img1 = h2Tester
-                v2Key1, v2Img1 = v2Tester
-                candidatePairs['horizontal2'].append(
-                    Pair(h2Key1, h2Img1, key2, img2))
-
-                candidatePairs['vertical2'].append(
-                    Pair(v2Key1, v2Img1, key2, img2))
-
-        for key in list(testPairs.keys())[:]:
-            if not testPairs[key]:
-                del candidatePairs[key]
-                del testPairs[key]
-
-        return testPairs, candidatePairs
-
     def Solve(self, problem):
-        tests = [self.calcNonMatchingPixelRatio, self.calcPixelIntersectRatio]
+        tests = [self.calcNonMatchingPixelRatio,
+                 self.calcDarknessRatio, self.calcPixelIntersectRatio]
 
-        if "Basic Problem E-01" not in problem.name:
-            return -1
+        # if "Basic Problem B-01" not in problem.name:
+        #    return -1
         print(problem.name)
         testers, candidates = self.initElements(problem)
         lonelyTesters, testerPairs = self.getTesterPairs(testers)
+
+        totalsForNorm = dict.fromkeys(list(testerPairs.values())[0].keys(), {})
 
         for candidate in candidates:
             for pair in lonelyTesters:
@@ -410,60 +312,30 @@ class Agent:
                 for tester_pair in tester_pairs:
                     relation = Relation(tester_pair, pair)
                     relation.calculate_diffs()
+
+                    for test_name, diff in relation.diffs:
+                        if test_name not in totalsForNorm[pair.direction]:
+                            totalsForNorm[pair.direction][test_name] = 0
+
+                        totalsForNorm[pair.direction][test_name] += diff
+
                     candidate.add_relation(relation)
 
         for candidate in candidates:
             for relation in candidate.relations:
-                print(relation.diffs)
-            # testerPair.run_tests(tests)
+                for test_name, diff in relation.diffs:
+                    total = totalsForNorm[relation.direction][test_name]
+                    norm_score = 0 if total == 0 else diff / total
+                    candidate.score += norm_score
+                    normalized = (test_name, norm_score)
+                    relation.normalized_diffs.append(normalized)
 
-        # xor = ImageChops.logical_xor(probImgs[0][1], probImgs[1][1])
-        # xor.show()
-        # testingPairs, candidatePairs = self.getPairs(probImgs, ansImgs)
-        # scores = dict.fromkeys([key for key, _ in ansImgs], 0)
+        candidates.sort(key=lambda candidate: candidate.score, reverse=False)
 
-        # for direction in testingPairs.keys():
-        #     testingList = testingPairs[direction]
-        #     candidateList = candidatePairs[direction]
-        #     runTests(testingList)
-        #     runTests(candidateList)
+        print("BEST: ", candidates[0].key, " SCORE: ", candidates[0].score)
+        print("RUNNER UP: ", candidates[1].key,
+              " SCORE: ", candidates[1].score)
+        print("Scores Table: ")
+        print(candidates, '\n')
 
-        # for direction, candidatePairList in candidatePairs.items():
-        #     testingPairList = testingPairs[direction]
-        #     tests = testingPairList[0].testResults.items()
-
-        #     for test, _ in tests:
-        #         total = 0
-        #         # print(test, ': ')
-        #         for candidate in candidatePairList:
-
-        #             # if (candidate.key1 == 'F') & (candidate.key2 == '1'):
-        #              #   self.calcDarknessRatio2(candidate.img1, candidate.img2)
-
-        #             result = candidate.testResults[test]
-        #             candidate.diffs[test] = 0
-        #             for testPair in testingPairList:
-        #                 testingResult = testPair.testResults[test]
-        #                 diff = abs(result - testingResult)
-        #                 candidate.diffs[test] += diff
-        #                 total += diff
-
-        #         # print('BEFORE: ', candidatePairList, '\n')
-        #         normalized = candidatePairList[:]
-        #         for candidate in normalized:
-        #             candidate.diffs[test] = 0 if total == 0 else (
-        #                 candidate.diffs[test] / total)
-        #             scores[candidate.key2] += candidate.diffs[test]
-
-        #         # print('AFTER: ', normalized, '\n')
-        #         # print('TEST PAIRS: ', testingPairList, '\n')
-        #         candidatePairList = normalized
-
-        # scoresList = list(scores.items())
-        # scoresList.sort(key=lambda entry: entry[1], reverse=False)
-
-        # print("BEST: ", scoresList[0][0], " SCORE: ", scoresList[0][1])
-        # print("RUNNER UP: ", scoresList[1]
-        #       [0], " SCORE: ", scoresList[1][1])
-        # print(scoresList, '\n')
-        # return int(scoresList[0][0])
+        return int(candidates[0].key)

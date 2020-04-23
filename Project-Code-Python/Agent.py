@@ -145,9 +145,34 @@ class Agent:
                 diagonals[pair_type]['diagonal'].append(diag2_pair)
 
         diag3 = matrix[[1, 2, 0], [2, 1, 0]]
-        diag4 = [[2, 0, 1], [0, 2, 1]]
-        diag5 = [[0, 1, 2], [1, 0, 2]]
-        print(diag3, diag4, diag5)
+        diag4 = matrix[[2, 0, 1], [0, 2, 1]]
+        diag5 = matrix[[0, 1, 2], [1, 0, 2]]
+        diagonals.update({'rev-adjacent': {'diagonal': []},
+                          'rev-separated': {'diagonal': []}})
+        for i in range(0, diag3.size):
+            diag3_tester1 = diag3[i]
+            diag4_tester1 = diag4[i]
+            diag5_tester1 = diag5[i]
+            for j in range(i + 1, diag3.size):
+                diag3_tester2 = diag3[j]
+                diag4_tester2 = diag4[j]
+                diag5_tester2 = diag5[j]
+                pair_type = 'rev-adjacent' if j == i + 1 else 'rev-separated'
+
+                diag3_pair = Pair(diag3_tester1, pair_type,
+                                  'diagonal', diag3_tester2)
+                diag4_pair = Pair(diag4_tester1, pair_type,
+                                  'diagonal', diag4_tester2)
+                diagonals[pair_type]['diagonal'].append(diag3_pair)
+                diagonals[pair_type]['diagonal'].append(diag4_pair)
+
+                if (diag5_tester2 is None):
+                    lonelyTesters.append(
+                        Pair(diag5_tester1, pair_type, 'diagonal'))
+                else:
+                    diag5_pair = Pair(diag5_tester1, pair_type,
+                                      'diagonal', diag5_tester2)
+                    diagonals[pair_type]['diagonal'].append(diag5_pair)
 
         return lonelyTesters, diagonals
 
@@ -281,8 +306,8 @@ class Agent:
             return diagonals
 
     def Solve(self, problem):
-        tests = [self.calcNonMatchingPixelRatio,
-                 self.calcDarknessRatio, self.calcPixelIntersectRatio]
+        tests = [
+            self.calcPixelIntersectRatio]
 
         # if "Basic Problem B-01" not in problem.name:
         #    return -1
@@ -290,7 +315,7 @@ class Agent:
         testers, candidates = self.initElements(problem)
         lonelyTesters, testerPairs = self.getTesterPairs(testers)
 
-        totalsForNorm = dict.fromkeys(list(testerPairs.values())[0].keys(), {})
+        totalsForNorm = dict.fromkeys(testerPairs['adjacent'].keys(), {})
 
         for candidate in candidates:
             for pair in lonelyTesters:

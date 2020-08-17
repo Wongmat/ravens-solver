@@ -1,0 +1,11 @@
+.DS_Store
+*.zip
+*.csv
+*.txt
+__pycache__/
+kbai-venv/
+bonnie/
+.bonnie
+.python-version
+
+
